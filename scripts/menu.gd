@@ -1,12 +1,19 @@
 class_name Menu
 extends Control
-## Ana menü: kahraman kartları, skor tablosu, güncelleme bildirimi.
+## Ana menü: Oyna / Skor Tablosu / Ayarlar, kahraman seçimi, güncelleme bildirimi.
 
 signal hero_chosen(index: int)
 
 var update_bar: Control
 var board_overlay: ColorRect
 var board_list: VBoxContainer
+var main_screen: Control
+var hero_screen: Control
+var settings_overlay: ColorRect
+var settings_status: Label
+var settings_download: TouchButton
+var settings_check: TouchButton
+var name_edit: LineEdit
 
 func _ready() -> void:
 	theme = Ui.theme()
@@ -17,37 +24,8 @@ func _ready() -> void:
 	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bg)
 
-	var vb := VBoxContainer.new()
-	vb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	vb.offset_top = 30
-	vb.offset_bottom = -20
-	vb.add_theme_constant_override("separation", 18)
-	add_child(vb)
-
-	var title := Ui.label("RELIC", 84, Ui.GOLD, true)
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vb.add_child(title)
-	var sub := Ui.label("Kaleni koru. Kahramanını seç.", 30, Color(0.9, 0.85, 0.75))
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	vb.add_child(sub)
-
-	var cards := HBoxContainer.new()
-	cards.alignment = BoxContainer.ALIGNMENT_CENTER
-	cards.add_theme_constant_override("separation", 30)
-	cards.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	vb.add_child(cards)
-	for i in Bal.HEROES.size():
-		cards.add_child(_card(i))
-
-	var bottom := HBoxContainer.new()
-	bottom.alignment = BoxContainer.ALIGNMENT_CENTER
-	bottom.add_theme_constant_override("separation", 30)
-	vb.add_child(bottom)
-	var board_btn := Ui.button("Skor Tablosu", 30, 300)
-	board_btn.pressed.connect(_open_board)
-	bottom.add_child(board_btn)
-	var ver := Ui.label("Sürüm %s" % AppVersion.NAME, 22, Color(1, 1, 1, 0.5))
-	bottom.add_child(ver)
+	_build_main_screen()
+	_build_hero_screen()
 
 	update_bar = Ui.button("", 28)
 	update_bar.visible = false
@@ -64,6 +42,7 @@ func _ready() -> void:
 		_on_update(Firebase.update_info.name, Firebase.update_info.url)
 
 	_build_board()
+	_build_settings()
 
 func _card(i: int) -> Control:
 	var h: Dictionary = Bal.HEROES[i]
@@ -160,3 +139,141 @@ func _open_board() -> void:
 	for i in scores.size():
 		var s: Dictionary = scores[i]
 		board_list.add_child(_row([i + 1, s.get("name", "?"), s.get("hero", ""), int(s.get("waves", 0)), Ui.fmt_time(float(s.get("seconds", 0))), int(s.get("kills", 0))]))
+
+# ---------------------------------------------------------------- ekranlar
+
+func _build_main_screen() -> void:
+	main_screen = CenterContainer.new()
+	main_screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(main_screen)
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 22)
+	vb.custom_minimum_size.x = 520
+	main_screen.add_child(vb)
+	var title := Ui.label("RELIC", 120, Ui.GOLD, true)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(title)
+	var sub := Ui.label("Kaleni koru.", 32, Color(0.9, 0.85, 0.75))
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(sub)
+	var gap := Control.new()
+	gap.custom_minimum_size.y = 30
+	vb.add_child(gap)
+	var play := Ui.button("Oyna", 40)
+	play.custom_minimum_size.y = 90
+	play.pressed.connect(func(): _show(hero_screen))
+	vb.add_child(play)
+	var board := Ui.button("Skor Tablosu", 34)
+	board.custom_minimum_size.y = 80
+	board.pressed.connect(_open_board)
+	vb.add_child(board)
+	var settings := Ui.button("Ayarlar", 34)
+	settings.custom_minimum_size.y = 80
+	settings.pressed.connect(_open_settings)
+	vb.add_child(settings)
+	var ver := Ui.label("Sürüm %s" % AppVersion.NAME, 22, Color(1, 1, 1, 0.5))
+	ver.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(ver)
+
+func _build_hero_screen() -> void:
+	var vb := VBoxContainer.new()
+	vb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	vb.offset_top = 30
+	vb.offset_bottom = -20
+	vb.add_theme_constant_override("separation", 18)
+	vb.visible = false
+	add_child(vb)
+	hero_screen = vb
+	var sub := Ui.label("Kahramanını seç", 44, Ui.GOLD, true)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(sub)
+	var cards := HBoxContainer.new()
+	cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	cards.add_theme_constant_override("separation", 30)
+	cards.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vb.add_child(cards)
+	for i in Bal.HEROES.size():
+		cards.add_child(_card(i))
+	var bottom := HBoxContainer.new()
+	bottom.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_child(bottom)
+	var back := Ui.button("Geri", 30, 260)
+	back.pressed.connect(func(): _show(main_screen))
+	bottom.add_child(back)
+
+func _show(screen: Control) -> void:
+	main_screen.visible = screen == main_screen
+	hero_screen.visible = screen == hero_screen
+
+func _build_settings() -> void:
+	settings_overlay = ColorRect.new()
+	settings_overlay.color = Color(0, 0, 0, 0.7)
+	settings_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	settings_overlay.visible = false
+	add_child(settings_overlay)
+	var cc := CenterContainer.new()
+	cc.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	settings_overlay.add_child(cc)
+	var p := PanelContainer.new()
+	cc.add_child(p)
+	var vb := VBoxContainer.new()
+	vb.custom_minimum_size = Vector2(760, 0)
+	vb.add_theme_constant_override("separation", 16)
+	p.add_child(vb)
+	var t := Ui.label("Ayarlar", 44, Ui.GOLD)
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(t)
+
+	vb.add_child(Ui.label("Oyuncu adı (skor tablosunda görünür)", 24, Color(0.85, 0.8, 0.72)))
+	name_edit = LineEdit.new()
+	name_edit.max_length = 16
+	name_edit.placeholder_text = "Adın"
+	name_edit.add_theme_font_size_override("font_size", 28)
+	name_edit.custom_minimum_size.y = 64
+	name_edit.text_changed.connect(func(txt): Firebase.set_player_name(txt.strip_edges()))
+	vb.add_child(name_edit)
+
+	vb.add_child(Ui.label("Sürüm: %s" % AppVersion.NAME, 28))
+	settings_check = Ui.button("Güncellemeleri kontrol et", 30)
+	settings_check.pressed.connect(_check_update)
+	vb.add_child(settings_check)
+	settings_status = Ui.label("", 26, Color(0.8, 0.9, 1.0))
+	settings_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(settings_status)
+	settings_download = Ui.button("İndir", 30)
+	settings_download.visible = false
+	settings_download.add_theme_stylebox_override("normal", Ui.box(Color(0.2, 0.45, 0.2), 12, Ui.GOLD, 2))
+	settings_download.pressed.connect(func(): OS.shell_open(Firebase.update_info.get("url", Firebase.RELEASES_URL)))
+	vb.add_child(settings_download)
+	var all := Ui.button("Tüm sürümler (GitHub)", 26)
+	all.pressed.connect(func(): OS.shell_open(Firebase.RELEASES_URL.replace("/latest", "")))
+	vb.add_child(all)
+
+	var close := Ui.button("Kapat", 30)
+	close.pressed.connect(func(): settings_overlay.visible = false)
+	vb.add_child(close)
+
+func _open_settings() -> void:
+	name_edit.text = Firebase.player_name
+	settings_status.text = ""
+	settings_download.visible = not Firebase.update_info.is_empty()
+	if settings_download.visible:
+		settings_status.text = "Yeni sürüm var: %s" % Firebase.update_info.name
+	settings_overlay.visible = true
+
+func _check_update() -> void:
+	settings_check.disabled = true
+	settings_status.text = "Kontrol ediliyor..."
+	var r: Dictionary = await Firebase.check_update()
+	settings_check.disabled = false
+	match r.status:
+		"available":
+			settings_status.text = "Yeni sürüm var: %s. İndir'e basınca tarayıcıda indirme sayfası açılır; indirilen APK'yı kurman yeterli." % r.name
+			settings_download.visible = true
+		"uptodate":
+			settings_status.text = "En güncel sürümü kullanıyorsun."
+			settings_download.visible = false
+		"dev":
+			settings_status.text = "Geliştirme sürümü, kontrol yapılmadı."
+		_:
+			settings_status.text = "Kontrol edilemedi. İnternet bağlantını kontrol et."

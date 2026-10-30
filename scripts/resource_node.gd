@@ -25,12 +25,12 @@ func setup(k: String, r: float, count: int, seed_v: int) -> void:
 	items.sort_custom(func(a, b): return a.pos.y < b.pos.y)
 
 func contains(p: Vector2) -> bool:
-	var d := p - global_position
+	var d := p - position
 	return Vector2(d.x, d.y / 0.65).length() <= radius
 
 ## Dokunulan noktaya en yakın öğeyi zıplat
 func tap(p: Vector2) -> void:
-	var local := p - global_position
+	var local := p - position
 	var best := 0
 	var best_d := INF
 	for i in items.size():

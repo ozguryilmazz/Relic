@@ -50,18 +50,25 @@ func _request(url: String, method := HTTPClient.METHOD_GET, body := "", headers 
 	var data = JSON.parse_string(text) if not text.is_empty() else null
 	return {"ok": r[0] == HTTPRequest.RESULT_SUCCESS and code >= 200 and code < 300, "code": code, "data": data}
 
+func set_player_name(nm: String) -> void:
+	player_name = nm
+	_save()
+
 # ---------------------------------------------------------------- sürüm
 
-func check_update() -> void:
+## Sonuç: {status: "available" | "uptodate" | "error" | "dev", name, url}
+func check_update() -> Dictionary:
 	if AppVersion.CODE <= 0:
-		return
+		return {"status": "dev"}
 	var r := await _request(DB_URL + "/config/latest.json")
 	if not r.ok or not (r.data is Dictionary):
-		return
+		return {"status": "error"}
 	var latest := int(r.data.get("code", 0))
 	if latest > AppVersion.CODE:
 		update_info = {"name": str(r.data.get("name", "")), "url": str(r.data.get("url", RELEASES_URL))}
 		update_available.emit(update_info.name, update_info.url)
+		return {"status": "available", "name": update_info.name, "url": update_info.url}
+	return {"status": "uptodate", "name": str(r.data.get("name", ""))}
 
 # ---------------------------------------------------------------- giriş
 
