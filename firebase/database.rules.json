@@ -1,0 +1,16 @@
+{
+  "rules": {
+    "config": {
+      ".read": true,
+      ".write": false
+    },
+    "scores": {
+      ".read": true,
+      ".indexOn": ["score"],
+      "$id": {
+        ".write": "auth != null && !data.exists()",
+        ".validate": "newData.hasChildren(['name', 'uid', 'score', 'waves', 'kills', 'seconds']) && newData.child('uid').val() === auth.uid && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 16 && newData.child('score').isNumber() && newData.child('waves').isNumber() && newData.child('waves').val() <= 100"
+      }
+    }
+  }
+}
