@@ -20,6 +20,7 @@ var face := -1.0
 var ammo := 0
 var shot_timer := 0.0
 var recoil := 0.0
+var idle := 0.0            # menzilli birliğin hedefsiz beklediği süre
 
 func setup(t: String, wave: int) -> void:
 	type = t
@@ -33,6 +34,10 @@ func setup(t: String, wave: int) -> void:
 
 func ranged() -> Dictionary:
 	return data.get("ranged", {}) if ammo > 0 else {}
+
+## Cephanesi bitince ya da hedefsiz kalınca geri çekilen tip mi (okçu, mancınık)
+func retreats() -> bool:
+	return data.has("ranged") and data.ranged.get("after", "advance") == "retreat"
 
 func hit(amount: float) -> void:
 	hp -= amount

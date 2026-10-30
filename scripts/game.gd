@@ -60,6 +60,8 @@ var phase := "prep"     # prep, wave, over
 var prep_left := 0.0
 var to_spawn := 0
 var roster: Array = []
+var linger := 0.0       # son asker çıktıktan sonra geçen süre
+var fast := false       # x2 hız
 var spawn_timer := 0.0
 var enemies: Array = []
 var kills := 0
@@ -354,6 +356,7 @@ func _update_waves(delta: float) -> void:
 			wave += 1
 			phase = "wave"
 			roster = Bal.wave_roster(wave, rng)
+			linger = 0.0
 			to_spawn = roster.size()
 			spawn_timer = 0.0
 			var news := Bal.new_types(wave)
@@ -369,13 +372,17 @@ func _update_waves(delta: float) -> void:
 				spawn_timer = Bal.SPAWN_INTERVAL
 				to_spawn -= 1
 				_spawn(roster.pop_back())
-		elif enemies.is_empty():
-			waves_cleared = wave
-			if wave >= Bal.MAX_WAVE:
-				_game_over(true)
-			else:
-				phase = "prep"
-				prep_left = Bal.PREP_TIME
+		else:
+			linger += delta
+			# son dalgada zafer için hepsinin yok olması gerekir; diğerlerinde uzun sürerse sıradaki hazırlanır
+			var timed_out := linger >= Bal.WAVE_LINGER and wave < Bal.MAX_WAVE
+			if enemies.is_empty() or timed_out:
+				waves_cleared = wave
+				if wave >= Bal.MAX_WAVE:
+					_game_over(true)
+				else:
+					phase = "prep"
+					prep_left = Bal.PREP_TIME
 
 func _spawn(t: String, at_s := 0.0) -> Enemy:
 	var e := Enemy.new()
@@ -412,7 +419,9 @@ func _update_enemies(delta: float) -> void:
 			Enemy.State.WALK:
 				var ns: float = e.s + spd * e.speed_mult * delta
 				var stop_at: float = s_barricade - float(e.get_meta("stop"))
-				if not r.is_empty() and _ranged_target(r) != "":
+				# geri çekilen tipler (okçu, mancınık) atış yerinde her durumda durur, dikenlere girmez;
+				# ilerleyen tipler (topçu) sadece hedefi varken durur
+				if not r.is_empty() and (e.retreats() or _ranged_target(r) != ""):
 					var stand: float = s_zone - float(r.stand) - float(e.get_meta("stop"))
 					if e.s <= stand and ns >= stand:
 						e.s = stand
@@ -437,9 +446,19 @@ func _update_enemies(delta: float) -> void:
 					bar_hit = true
 			Enemy.State.SHOOT:
 				var target := _ranged_target(r)
-				if r.is_empty() or target == "":
-					e.state = Enemy.State.WALK
+				if r.is_empty():
+					# cephane bitti
+					e.state = Enemy.State.FLEE if e.retreats() else Enemy.State.WALK
+				elif target == "":
+					if e.retreats():
+						# hedef yok (barikat yıkık): bir süre bekle, barikat kurulmazsa geri çekil
+						e.idle += delta
+						if e.idle >= Bal.RANGED_PATIENCE:
+							e.state = Enemy.State.FLEE
+					else:
+						e.state = Enemy.State.WALK
 				else:
+					e.idle = 0.0
 					e.shot_timer -= delta
 					if e.shot_timer <= 0.0:
 						e.shot_timer = float(r.interval)
@@ -447,7 +466,7 @@ func _update_enemies(delta: float) -> void:
 						e.recoil = 1.0
 						_fire(e, r, target)
 						if e.ammo <= 0:
-							e.state = Enemy.State.WALK
+							e.state = Enemy.State.FLEE if e.retreats() else Enemy.State.WALK
 			Enemy.State.FLEE:
 				e.s -= spd * e.speed_mult * delta
 				if e.s <= 0.0:
@@ -534,10 +553,18 @@ func _hit_castle(amount: float) -> void:
 	Sfx.play("hit_castle")
 	Sfx.vibrate(60)
 
+func set_fast(on: bool) -> void:
+	fast = on
+	Engine.time_scale = 2.0 if on else 1.0
+
+func _exit_tree() -> void:
+	Engine.time_scale = 1.0
+
 func _game_over(victory: bool) -> void:
 	if phase == "over":
 		return
 	phase = "over"
+	set_fast(false)
 	castle_def = maxf(castle_def, 0.0)
 	player_castle.value = castle_def
 	var stats := {

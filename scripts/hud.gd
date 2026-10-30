@@ -10,6 +10,7 @@ var wave_label: Label
 var phase_label: Label
 var time_label: Label
 var pause_btn: TouchButton
+var speed_btn: TouchButton
 var ult_buttons: Array = []
 var hint_label: Label
 var slave_btn: TouchButton
@@ -71,6 +72,12 @@ func _build_top() -> void:
 	hb.add_child(phase_label)
 	time_label = Ui.label("", 28)
 	hb.add_child(time_label)
+	speed_btn = Ui.button("x1", 30, 90)
+	speed_btn.pressed.connect(func():
+		game.set_fast(not game.fast)
+		speed_btn.text = "x2" if game.fast else "x1"
+		speed_btn.add_theme_color_override("font_color", Ui.GOLD if game.fast else Color(1, 0.95, 0.85)))
+	hb.add_child(speed_btn)
 	pause_btn = Ui.button("II", 30, 70)
 	pause_btn.pressed.connect(_pause)
 	hb.add_child(pause_btn)

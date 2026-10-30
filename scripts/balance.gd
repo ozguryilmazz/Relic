@@ -6,6 +6,8 @@ const MAX_WAVE := 100
 const PREP_TIME := 10.0            # dalgalar arası hazırlık (sn)
 const SPAWN_INTERVAL := 1.0        # aynı dalgada iki düşman arası (sn)
 const ENEMY_TRAVEL_TIME := 24.0    # düşmanın yolun tamamını yürüme süresi (sn)
+const WAVE_LINGER := 20.0          # son asker çıktıktan sonra en fazla bu kadar beklenir, sonra sıradaki dalga hazırlanır
+const RANGED_PATIENCE := 12.0      # hedefi olmayan menzilli birlik bu kadar bekler, sonra geri çekilir
 
 # --- Kaynak toplama (tıklama başına) ---
 const YIELD := {
@@ -55,19 +57,21 @@ func enemy_dps(wave: int) -> float:
 # hp/speed/melee: temel değerin çarpanı. fear: öldürünce verdiği korku.
 # ranged: menzilli tipler diken bölgesinin "stand" piksel önünde durur ve ateş eder.
 #   target: "barricade" (barikat yoksa yürür), "barricade_castle" (barikat yoksa kaleye),
-#   "castle" (doğrudan kale). ammo atış bitince yürümeye başlar.
+#   "castle" (doğrudan kale).
+#   after: cephane bitince / hedef kalmayınca ne yapar: "retreat" geri çekilir (dikenlere hiç girmez),
+#   "advance" yürüyerek ilerler (dikenlerden geçer, barikata saldırır).
 #   shot: bir atışın hasarı = shot × 3 × wave_scale
 const ENEMY_TYPES := {
 	"koylu":   {"name": "Köylüler", "hp": 0.8, "speed": 1.0, "melee": 0.8, "fear": 1},
 	"sopali":  {"name": "Sopalı askerler", "hp": 1.0, "speed": 1.0, "melee": 1.0, "fear": 1},
 	"okcu":    {"name": "Okçular", "hp": 0.6, "speed": 1.0, "melee": 0.5, "fear": 1,
-		"ranged": {"target": "barricade", "stand": 110.0, "ammo": 8, "interval": 1.2, "shot": 1.0, "proj": "arrow"}},
+		"ranged": {"target": "barricade", "stand": 110.0, "ammo": 8, "interval": 1.2, "shot": 1.0, "proj": "arrow", "after": "retreat"}},
 	"atli":    {"name": "Atlılar", "hp": 1.5, "speed": 1.8, "melee": 1.5, "fear": 2},
 	"topcu":   {"name": "Topçular", "hp": 1.2, "speed": 0.8, "melee": 0.5, "fear": 2,
-		"ranged": {"target": "barricade_castle", "stand": 230.0, "ammo": 4, "interval": 2.5, "shot": 5.0, "proj": "ball"}},
+		"ranged": {"target": "barricade_castle", "stand": 230.0, "ammo": 4, "interval": 2.5, "shot": 5.0, "proj": "ball", "after": "advance"}},
 	"araba":   {"name": "Atlı arabalar", "hp": 4.0, "speed": 0.7, "melee": 3.0, "fear": 3, "drops": 2},
 	"mancinik": {"name": "Mancınıklar", "hp": 3.0, "speed": 0.5, "melee": 1.0, "fear": 5,
-		"ranged": {"target": "castle", "stand": 480.0, "ammo": 3, "interval": 4.0, "shot": 15.0, "proj": "rock"}},
+		"ranged": {"target": "castle", "stand": 480.0, "ammo": 3, "interval": 4.0, "shot": 15.0, "proj": "rock", "after": "retreat"}},
 }
 
 ## Dalganın tip karışımı: [[tip, ağırlık], ...]

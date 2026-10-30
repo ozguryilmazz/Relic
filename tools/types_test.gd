@@ -18,13 +18,21 @@ func _ready() -> void:
 	g.barricade.hp = 800
 	g.castle_def = 3000
 	var seen := {}
+	var violations := 0
+	var fled := 0
+	if args.size() > 2:
+		g.barricade.hp = float(args[2])
 	Engine.time_scale = 6.0 if DisplayServer.get_name() != "headless" else 4.0
 	for i in 60 * 14:
 		await get_tree().process_frame
 		for e in g.enemies:
 			seen[e.type] = true
+			if e.retreats() and e.s >= g.s_zone:
+				violations += 1
+			if e.retreats() and e.state == Enemy.State.FLEE:
+				fled += 1
 		if i == 130 and DisplayServer.get_name() != "headless":
 			get_viewport().get_texture().get_image().save_png(out + "/types_%d.png" % start)
 			break
-	print("dalga ", g.wave, " görülen tipler: ", seen.keys(), " kale ", int(g.castle_def), " barikat ", int(g.barricade.hp), " öldürülen ", g.kills)
+	print("dalga ", g.wave, " görülen tipler: ", seen.keys(), " kale ", int(g.castle_def), " barikat ", int(g.barricade.hp), " öldürülen ", g.kills, " dikene giren okçu/mancınık karesi ", violations, " geri çekilen karesi ", fled, " dalga geçişi ", g.waves_cleared)
 	get_tree().quit()
