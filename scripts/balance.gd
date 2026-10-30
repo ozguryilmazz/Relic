@@ -51,6 +51,78 @@ func enemy_dps(wave: int) -> float:
 	# barikata saniyede verdiği hasar
 	return 3.0 * wave_scale(wave)
 
+# --- Düşman tipleri ---
+# hp/speed/melee: temel değerin çarpanı. fear: öldürünce verdiği korku.
+# ranged: menzilli tipler diken bölgesinin "stand" piksel önünde durur ve ateş eder.
+#   target: "barricade" (barikat yoksa yürür), "barricade_castle" (barikat yoksa kaleye),
+#   "castle" (doğrudan kale). ammo atış bitince yürümeye başlar.
+#   shot: bir atışın hasarı = shot × 3 × wave_scale
+const ENEMY_TYPES := {
+	"koylu":   {"name": "Köylüler", "hp": 0.8, "speed": 1.0, "melee": 0.8, "fear": 1},
+	"sopali":  {"name": "Sopalı askerler", "hp": 1.0, "speed": 1.0, "melee": 1.0, "fear": 1},
+	"okcu":    {"name": "Okçular", "hp": 0.6, "speed": 1.0, "melee": 0.5, "fear": 1,
+		"ranged": {"target": "barricade", "stand": 110.0, "ammo": 8, "interval": 1.2, "shot": 1.0, "proj": "arrow"}},
+	"atli":    {"name": "Atlılar", "hp": 1.5, "speed": 1.8, "melee": 1.5, "fear": 2},
+	"topcu":   {"name": "Topçular", "hp": 1.2, "speed": 0.8, "melee": 0.5, "fear": 2,
+		"ranged": {"target": "barricade_castle", "stand": 230.0, "ammo": 4, "interval": 2.5, "shot": 5.0, "proj": "ball"}},
+	"araba":   {"name": "Atlı arabalar", "hp": 4.0, "speed": 0.7, "melee": 3.0, "fear": 3, "drops": 2},
+	"mancinik": {"name": "Mancınıklar", "hp": 3.0, "speed": 0.5, "melee": 1.0, "fear": 5,
+		"ranged": {"target": "castle", "stand": 480.0, "ammo": 3, "interval": 4.0, "shot": 15.0, "proj": "rock"}},
+}
+
+## Dalganın tip karışımı: [[tip, ağırlık], ...]
+func wave_mix(wave: int) -> Array:
+	if wave <= 5:
+		return [["koylu", 1.0]]
+	if wave <= 10:
+		return [["sopali", 1.0]]
+	if wave <= 15:
+		return [["sopali", 0.7], ["okcu", 0.3]]
+	if wave <= 25:
+		return [["sopali", 0.5], ["okcu", 0.25], ["atli", 0.25]]
+	if wave <= 30:
+		return [["sopali", 0.4], ["okcu", 0.2], ["atli", 0.25], ["topcu", 0.15]]
+	if wave <= 35:
+		return [["sopali", 0.3], ["okcu", 0.2], ["atli", 0.2], ["topcu", 0.15], ["araba", 0.15]]
+	return [["sopali", 0.25], ["okcu", 0.2], ["atli", 0.2], ["topcu", 0.12], ["araba", 0.13], ["mancinik", 0.1]]
+
+## Dalganın asker listesi (karışık sırada). Yeni tipin ilk dalgasında en az 1 tane olur.
+func wave_roster(wave: int, rng: RandomNumberGenerator) -> Array:
+	var count := enemy_count(wave)
+	var mix := wave_mix(wave)
+	var out: Array = []
+	for pair in mix:
+		var n := int(round(count * float(pair[1])))
+		if n == 0:
+			n = 1
+		for i in n:
+			out.append(pair[0])
+	# sayıyı tam tut
+	while out.size() > count:
+		out.remove_at(out.find(mix[0][0]))
+	while out.size() < count:
+		out.append(mix[0][0])
+	# karıştır (rng ile, tekrar edilebilir olsun)
+	for i in range(out.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var tmp = out[i]
+		out[i] = out[j]
+		out[j] = tmp
+	return out
+
+## Bu dalgada ilk kez görülen tipler
+func new_types(wave: int) -> Array:
+	if wave <= 1:
+		return []
+	var prev := {}
+	for pair in wave_mix(wave - 1):
+		prev[pair[0]] = true
+	var out: Array = []
+	for pair in wave_mix(wave):
+		if not prev.has(pair[0]):
+			out.append(pair[0])
+	return out
+
 func slave_cost(owned: int) -> int:
 	return SLAVE_BASE_COST + SLAVE_COST_STEP * owned
 

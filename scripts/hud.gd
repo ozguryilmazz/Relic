@@ -182,10 +182,11 @@ func _build_banner() -> void:
 	banner_label = Ui.label("", 72, Ui.GOLD, true)
 	banner_label.set_anchors_preset(Control.PRESET_CENTER)
 	banner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	banner_label.offset_left = -400
-	banner_label.offset_right = 400
-	banner_label.offset_top = -260
-	banner_label.offset_bottom = -170
+	banner_label.offset_left = -600
+	banner_label.offset_right = 600
+	banner_label.offset_top = -330
+	banner_label.offset_bottom = -130
+	banner_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	banner_label.modulate.a = 0.0
 	root.add_child(banner_label)
 
@@ -220,6 +221,7 @@ func _build_pause() -> void:
 	var cont := Ui.button("Devam", 32)
 	cont.pressed.connect(_resume)
 	vb.add_child(cont)
+	Ui.audio_toggles(vb)
 	var menu := Ui.button("Ana Menü", 32)
 	menu.pressed.connect(func():
 		get_tree().paused = false

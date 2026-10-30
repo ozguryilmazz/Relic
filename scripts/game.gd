@@ -32,6 +32,7 @@ const RES_COLORS := {
 var hero: Dictionary
 var path: GamePath
 var world: Node2D
+var ground: Node2D
 var fx: Fx
 var hud: Hud
 var player_castle: Castle
@@ -58,6 +59,7 @@ var waves_cleared := 0
 var phase := "prep"     # prep, wave, over
 var prep_left := 0.0
 var to_spawn := 0
+var roster: Array = []
 var spawn_timer := 0.0
 var enemies: Array = []
 var kills := 0
@@ -81,6 +83,11 @@ func _ready() -> void:
 	enemy_speed = path.length / Bal.ENEMY_TRAVEL_TIME
 	castle_def = Bal.START_CASTLE
 	prep_left = Bal.PREP_TIME
+
+	ground = Node2D.new()
+	ground.z_index = -1
+	ground.draw.connect(_draw_ground)
+	add_child(ground)
 
 	world = Node2D.new()
 	world.y_sort_enabled = true
@@ -169,6 +176,7 @@ func _gather(kind: String, p: Vector2, show_text: bool) -> void:
 	res[key] += amount
 	collected[key] += amount
 	if show_text:
+		Sfx.play("tap", {"odun": 0.85, "tas": 1.15, "kemik": 1.4, "cali": 1.0}[kind])
 		var s := "+%s %s" % [_fmt(amount), RES_NAMES[key]]
 		fx.text(p, s, RES_COLORS[key], 28)
 
@@ -190,6 +198,7 @@ func add_castle(kind: String, want: int) -> void:
 	var n := spend(kind, want)
 	if n > 0:
 		castle_def += n * Bal.CASTLE_VALUE[kind]
+		Sfx.play("place")
 		fx.text(player_castle.position + Vector2(0, -250), "+%d" % int(n * Bal.CASTLE_VALUE[kind]), Color(0.6, 0.85, 1.0), 32)
 
 func barricade_locked() -> bool:
@@ -206,12 +215,14 @@ func add_barricade(kind: String, want: int) -> void:
 	var n := spend(kind, want)
 	if n > 0:
 		barricade.hp += n * Bal.BARRICADE_VALUE[kind]
+		Sfx.play("place", 0.9)
 		fx.text(barricade.position + Vector2(0, -120), "+%d" % int(n * Bal.BARRICADE_VALUE[kind]), Color(1, 0.85, 0.4), 30)
 
 func add_thorns(want: int) -> void:
 	var n := spend("diken", want)
 	if n > 0:
 		thorns += n
+		Sfx.play("place", 1.3)
 		fx.text(path.pos_at((s_zone + s_barricade) * 0.5), "+%d Diken" % n, RES_COLORS.diken, 28)
 
 func buy_slave() -> bool:
@@ -263,11 +274,14 @@ func eat_herb(i: int) -> bool:
 		return false
 	res.sifa -= 1.0
 	ult_cd[i] = maxf(0.0, ult_cd[i] - Bal.HERB_COOLDOWN_CUT)
+	Sfx.play("herb", 1.0 + randf() * 0.2)
 	return true
 
 func _activate(i: int) -> void:
 	var u: Dictionary = hero.ultis[i]
 	ult_cd[i] = u.cooldown
+	Sfx.play("smash" if u.kind == "smash" else "ulti")
+	Sfx.vibrate(60 if u.kind == "smash" else 30)
 	match u.kind:
 		"smash":
 			var front: Enemy = null
@@ -339,16 +353,22 @@ func _update_waves(delta: float) -> void:
 		if prep_left <= 0.0:
 			wave += 1
 			phase = "wave"
-			to_spawn = Bal.enemy_count(wave)
+			roster = Bal.wave_roster(wave, rng)
+			to_spawn = roster.size()
 			spawn_timer = 0.0
-			hud.banner("Dalga %d" % wave)
+			var news := Bal.new_types(wave)
+			if news.is_empty():
+				hud.banner("Dalga %d" % wave)
+			else:
+				hud.banner("Dalga %d\n%s geliyor!" % [wave, Bal.ENEMY_TYPES[news[0]].name])
+			Sfx.play("wave")
 	elif phase == "wave":
 		if to_spawn > 0:
 			spawn_timer -= delta
 			if spawn_timer <= 0.0:
 				spawn_timer = Bal.SPAWN_INTERVAL
 				to_spawn -= 1
-				_spawn()
+				_spawn(roster.pop_back())
 		elif enemies.is_empty():
 			waves_cleared = wave
 			if wave >= Bal.MAX_WAVE:
@@ -357,17 +377,16 @@ func _update_waves(delta: float) -> void:
 				phase = "prep"
 				prep_left = Bal.PREP_TIME
 
-func _spawn() -> void:
+func _spawn(t: String, at_s := 0.0) -> Enemy:
 	var e := Enemy.new()
-	e.max_hp = Bal.enemy_hp(wave)
-	e.hp = e.max_hp
-	e.dps = Bal.enemy_dps(wave)
+	e.setup(t, maxi(wave, 1))
 	e.lane = rng.randf_range(-22.0, 22.0)
 	e.set_meta("stop", rng.randf_range(18.0, 60.0))
-	e.s = 0.0
+	e.s = at_s
 	world.add_child(e)
 	enemies.append(e)
 	_place(e)
+	return e
 
 func _place(e: Enemy) -> void:
 	var d := path.dir_at(e.s)
@@ -386,11 +405,20 @@ func _update_enemies(delta: float) -> void:
 		dmg *= float(active_ulti.poison.mult)
 	var dead: Array = []
 	var bar_hit := false
+	var bar_before := barricade.hp
 	for e in enemies:
+		var r: Dictionary = e.ranged()
 		match e.state:
 			Enemy.State.WALK:
+				var ns: float = e.s + spd * e.speed_mult * delta
 				var stop_at: float = s_barricade - float(e.get_meta("stop"))
-				var ns: float = e.s + spd * delta
+				if not r.is_empty() and _ranged_target(r) != "":
+					var stand: float = s_zone - float(r.stand) - float(e.get_meta("stop"))
+					if e.s <= stand and ns >= stand:
+						e.s = stand
+						e.state = Enemy.State.SHOOT
+						e.shot_timer = rng.randf_range(0.2, float(r.interval))
+						continue
 				if barricade.hp > 0.0 and e.s <= stop_at and ns >= stop_at:
 					e.s = stop_at
 					e.state = Enemy.State.ATTACK
@@ -398,9 +426,7 @@ func _update_enemies(delta: float) -> void:
 					e.s = ns
 				if e.s >= s_castle:
 					# sızma: kalan canı kadar vurur ve yok olur
-					castle_def -= e.hp
-					player_castle.hit_fx()
-					fx.text(player_castle.position + Vector2(0, -200), "-%d" % int(ceil(e.hp)), Color(1, 0.35, 0.3), 34)
+					_hit_castle(e.hp)
 					e.hp = 0.0
 					e.set_meta("leaked", true)
 			Enemy.State.ATTACK:
@@ -409,8 +435,21 @@ func _update_enemies(delta: float) -> void:
 				else:
 					barricade.hp -= e.dps * delta
 					bar_hit = true
+			Enemy.State.SHOOT:
+				var target := _ranged_target(r)
+				if r.is_empty() or target == "":
+					e.state = Enemy.State.WALK
+				else:
+					e.shot_timer -= delta
+					if e.shot_timer <= 0.0:
+						e.shot_timer = float(r.interval)
+						e.ammo -= 1
+						e.recoil = 1.0
+						_fire(e, r, target)
+						if e.ammo <= 0:
+							e.state = Enemy.State.WALK
 			Enemy.State.FLEE:
-				e.s -= spd * delta
+				e.s -= spd * e.speed_mult * delta
 				if e.s <= 0.0:
 					e.hp = 0.0
 					e.set_meta("leaked", true)
@@ -421,6 +460,7 @@ func _update_enemies(delta: float) -> void:
 				thorns -= 1.0
 				e.thorn_acc -= 1.0
 				e.hit(dmg)
+				Sfx.play("thorn")
 			e.thorn_acc = minf(e.thorn_acc, 1.0)
 		if e.hp <= 0.0:
 			dead.append(e)
@@ -428,15 +468,71 @@ func _update_enemies(delta: float) -> void:
 			_place(e)
 	if barricade.hp <= 0.0:
 		barricade.hp = 0.0
-	if bar_hit and rng.randf() < 0.1:
-		barricade.hit_fx()
+	if bar_hit:
+		Sfx.play("hit_bar", 1.0, -6.0)
+		if rng.randf() < 0.1:
+			barricade.hit_fx()
+	if bar_before > 0.0 and barricade.hp <= 0.0:
+		Sfx.play("break")
+		Sfx.vibrate(120)
+		fx.puff(barricade.position, Color(0.6, 0.45, 0.3))
+		hud.banner("Barikat yıkıldı!")
 	for e in dead:
 		enemies.erase(e)
 		if not e.has_meta("leaked"):
 			kills += 1
-			fear += Bal.FEAR_PER_KILL
+			fear += int(e.data.get("fear", Bal.FEAR_PER_KILL))
 			fx.puff(e.position)
+			Sfx.play("death")
+			# atlı araba yıkılınca içindekiler iner
+			for k in int(e.data.get("drops", 0)):
+				var d := _spawn("sopali", maxf(0.0, e.s - 10.0 - k * 14.0))
+				d.state = Enemy.State.WALK
 		e.queue_free()
+
+## Menzilli tipin şu anki hedefi: "barricade", "castle" ya da "" (hedef yok -> yürür)
+func _ranged_target(r: Dictionary) -> String:
+	if r.is_empty():
+		return ""
+	match r.target:
+		"barricade":
+			return "barricade" if barricade.hp > 0.0 else ""
+		"barricade_castle":
+			return "barricade" if barricade.hp > 0.0 else "castle"
+		"castle":
+			return "castle"
+	return ""
+
+func _fire(e: Enemy, r: Dictionary, target: String) -> void:
+	var dmg: float = float(r.shot) * 3.0 * Bal.wave_scale(maxi(wave, 1))
+	var from := e.position + Vector2(e.face * 20.0, -40.0)
+	var to := barricade.position + Vector2(0, -40) if target == "barricade" else player_castle.position + Vector2(rng.randf_range(-60, 60), -120)
+	var kind: String = r.proj
+	Sfx.play({"arrow": "arrow", "ball": "boom", "rock": "rock"}[kind])
+	var dur := clampf(from.distance_to(to) / 900.0, 0.35, 1.4)
+	fx.projectile(from, to, kind, dur, func():
+		if phase == "over":
+			return
+		if target == "barricade":
+			if barricade.hp > 0.0:
+				barricade.hp = maxf(0.0, barricade.hp - dmg)
+				barricade.hit_fx()
+				Sfx.play("hit_bar")
+				if barricade.hp <= 0.0:
+					Sfx.play("break")
+					Sfx.vibrate(120)
+					hud.banner("Barikat yıkıldı!")
+		else:
+			_hit_castle(dmg)
+		if kind != "arrow":
+			fx.puff(to, Color(0.5, 0.45, 0.4)))
+
+func _hit_castle(amount: float) -> void:
+	castle_def -= amount
+	player_castle.hit_fx()
+	fx.text(player_castle.position + Vector2(0, -200), "-%d" % int(ceil(amount)), Color(1, 0.35, 0.3), 34)
+	Sfx.play("hit_castle")
+	Sfx.vibrate(60)
 
 func _game_over(victory: bool) -> void:
 	if phase == "over":
@@ -458,24 +554,28 @@ func _game_over(victory: bool) -> void:
 		"sifa": int(collected.sifa),
 	}
 	hud.show_game_over(stats)
+	Sfx.play("gameover")
+	Sfx.vibrate(400)
 	finished.emit(stats)
 
 # ---------------------------------------------------------------- çizim
 
-func _draw() -> void:
+func _draw_ground() -> void:
 	# çimen
-	draw_rect(Rect2(-1200, -800, MAP_SIZE.x + 2400, MAP_SIZE.y + 1600), Color(0.3, 0.5, 0.25))
+	ground.draw_rect(Rect2(-1200, -800, MAP_SIZE.x + 2400, MAP_SIZE.y + 1600), Color(0.3, 0.5, 0.25))
 	var r2 := RandomNumberGenerator.new()
 	r2.seed = 42
 	for i in 160:
 		var p := Vector2(r2.randf_range(0, MAP_SIZE.x), r2.randf_range(100, MAP_SIZE.y))
-		Gfx.ellipse(self, p, r2.randf_range(20, 60), r2.randf_range(8, 20), Color(0.27, 0.46, 0.22, 0.6))
+		Gfx.ellipse(ground, p, r2.randf_range(20, 60), r2.randf_range(8, 20), Color(0.27, 0.46, 0.22, 0.6))
 	# yol (gölge + kenar + toprak)
-	draw_polyline(path.points, Color(0, 0, 0, 0.18), 96.0, true)
-	draw_polyline(path.points, Color(0.45, 0.33, 0.2), 86.0, true)
-	draw_polyline(path.points, Color(0.68, 0.53, 0.34), 70.0, true)
+	ground.draw_polyline(path.points, Color(0, 0, 0, 0.18), 96.0, true)
+	ground.draw_polyline(path.points, Color(0.45, 0.33, 0.2), 86.0, true)
+	ground.draw_polyline(path.points, Color(0.68, 0.53, 0.34), 70.0, true)
 	for p in path.points:
-		draw_circle(p, 35.0, Color(0.68, 0.53, 0.34))
+		ground.draw_circle(p, 35.0, Color(0.68, 0.53, 0.34))
+
+func _draw() -> void:
 	# diken bölgesi
 	var zone := path.sub_points(s_zone, s_barricade)
 	var zcol := Color(0.35, 0.22, 0.12, 0.55) if thorns >= 1.0 else Color(0.35, 0.22, 0.12, 0.25)

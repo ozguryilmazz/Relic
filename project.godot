@@ -13,6 +13,7 @@ config/icon="res://icon.svg"
 
 Bal="*res://scripts/balance.gd"
 Firebase="*res://scripts/firebase.gd"
+Sfx="*res://scripts/sfx.gd"
 
 [display]
 

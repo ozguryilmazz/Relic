@@ -233,6 +233,7 @@ func _build_settings() -> void:
 	name_edit.text_changed.connect(func(txt): Firebase.set_player_name(txt.strip_edges()))
 	vb.add_child(name_edit)
 
+	Ui.audio_toggles(vb)
 	vb.add_child(Ui.label("Sürüm: %s" % AppVersion.NAME, 28))
 	settings_check = Ui.button("Güncellemeleri kontrol et", 30)
 	settings_check.pressed.connect(_check_update)

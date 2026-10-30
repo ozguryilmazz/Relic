@@ -60,6 +60,21 @@ static func button(text: String, size := 28, min_w := 0.0) -> TouchButton:
 	b.focus_mode = Control.FOCUS_NONE
 	return b
 
+static func toggle(text: String, value: bool, on_change: Callable, size := 30) -> CheckButton:
+	var c := CheckButton.new()
+	c.text = text
+	c.button_pressed = value
+	c.focus_mode = Control.FOCUS_NONE
+	c.add_theme_font_size_override("font_size", size)
+	c.custom_minimum_size.y = 64
+	c.toggled.connect(on_change)
+	return c
+
+## Ses ve titreşim anahtarları (Ayarlar ve duraklatma menüsü ortak kullanır)
+static func audio_toggles(parent: Control) -> void:
+	parent.add_child(toggle("Ses", Sfx.sound_on, func(on): Sfx.set_sound(on)))
+	parent.add_child(toggle("Titreşim", Sfx.vibration_on, func(on): Sfx.set_vibration(on)))
+
 static func fmt_time(sec: float) -> String:
 	var s := int(sec)
 	return "%02d:%02d" % [s / 60, s % 60]
