@@ -12,11 +12,13 @@ var spend_timer := 0.0
 var last_wave := 0
 
 func _ready() -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	var args := OS.get_cmdline_user_args()
 	if args.size() > 0:
 		taps_per_sec = float(args[0])
 	if args.size() > 1:
 		hero_i = int(args[1])
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://sim_%d.log" % hero_i))
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	await get_tree().process_frame
@@ -28,10 +30,29 @@ func _process(delta: float) -> void:
 	if game == null or game.phase == "over":
 		return
 	frames += 1
+	if game.hud.relic_open():
+		var ch: Array = []
+		for c in game.hud.relic_cards.get_children():
+			ch.append(c)
+		var keys: Array = []
+		for id in Bal.RELICS:
+			pass
+		# kartlar butonlardır; ilk kartı seç
+		if ch.size() > 0:
+			ch[randi() % ch.size()].pressed.emit()
+		return
 	acc += taps_per_sec * delta
 	while acc >= 1.0:
 		acc -= 1.0
 		# kaynak dağılımı: çalı ağırlıklı
+		# dokunuşların bir kısmı öndeki düşmana vuruş
+		if not game.enemies.is_empty() and randf() < 0.3:
+			var front: Enemy = game.enemies[0]
+			for e in game.enemies:
+				if e.s > front.s:
+					front = e
+			game.strike(front)
+			continue
 		var r := randf()
 		var kind := "cali"
 		if r < 0.2: kind = "odun"
@@ -55,11 +76,18 @@ func _process(delta: float) -> void:
 			game.eat_herb(i)
 	if game.wave != last_wave and game.wave % 5 == 0:
 		last_wave = game.wave
-		print("dalga %d  kale %.0f  barikat %.0f  diken %.0f  köle %d  t=%s" % [game.wave, game.castle_def, game.barricade.hp, game.thorns, game.slaves, Ui.fmt_time(game.time_alive)])
+		_log("dalga %d  kale %.0f  barikat %.0f  diken %.0f  köle %d  relik %d  t=%s" % [game.wave, game.castle_def, game.barricade.hp, game.thorns, game.slaves, game.relics.size(), Ui.fmt_time(game.time_alive)])
 	if frames > 60 * 60 * 75:
-		print("zaman aşımı")
+		_log("zaman aşımı dalga %d" % game.wave)
 		get_tree().quit()
 
+func _log(t: String) -> void:
+	print(t)
+	var f := FileAccess.open("user://sim_%d.log" % hero_i, FileAccess.READ_WRITE if FileAccess.file_exists("user://sim_%d.log" % hero_i) else FileAccess.WRITE)
+	f.seek_end()
+	f.store_line(t)
+	f.close()
+
 func _done(stats: Dictionary) -> void:
-	print("SONUÇ ", stats)
+	_log("SONUÇ " + str(stats))
 	get_tree().quit()

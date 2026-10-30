@@ -68,10 +68,24 @@ var kills := 0
 var time_alive := 0.0
 
 var ult_cd: Array = [0.0, 0.0]
+var herb_cut: Array = [0.0, 0.0]   # bu beklemede şifayla kısaltılan süre
 var effects := {"gather": 0.0, "poison": 0.0, "slow": 0.0, "heal": 0.0}
 var active_ulti := {}   # kind -> ulti dict (efekt süresince)
 var touches := {}
 var rng := RandomNumberGenerator.new()
+
+# relikler, kombo, altın kaynak, boss
+var relics := {}         # id -> seviye
+var combo := 0
+var combo_timer := 0.0
+var best_combo := 0
+var golden_node: ResourceNode = null
+var golden_next := 0.0
+var pending_legend := false
+var boss: Enemy = null
+
+func lv(id: String) -> int:
+	return int(relics.get(id, 0))
 
 func setup(hero_data: Dictionary) -> void:
 	hero = hero_data
@@ -85,6 +99,7 @@ func _ready() -> void:
 	enemy_speed = path.length / Bal.ENEMY_TRAVEL_TIME
 	castle_def = Bal.START_CASTLE
 	prep_left = Bal.PREP_TIME
+	golden_next = rng.randf_range(Bal.GOLDEN_EVERY.x, Bal.GOLDEN_EVERY.y)
 
 	ground = Node2D.new()
 	ground.z_index = -1
@@ -154,8 +169,12 @@ func _tap(p: Vector2) -> void:
 	if Rect2(player_castle.position + Vector2(-150, -280), Vector2(300, 310)).has_point(p):
 		hud.open_popup("castle", p + position)
 		return
-	if p.distance_to(path.pos_at(s_barricade)) < 70.0:
+	if p.distance_to(path.pos_at(s_barricade) + Vector2(0, -30)) < 50.0:
 		hud.open_popup("barricade", p + position)
+		return
+	var target := _enemy_at(p)
+	if target:
+		strike(target)
 		return
 	var c := path.closest(p)
 	if c.dist < 60.0 and c.s >= s_zone - 20.0 and c.s < s_barricade - 30.0:
@@ -164,14 +183,84 @@ func _tap(p: Vector2) -> void:
 	for n in nodes:
 		if n.contains(p):
 			n.tap(p)
-			_gather(n.kind, p, true)
+			_register_tap()
+			var golden: bool = n == golden_node and n.golden > 0.0
+			if golden:
+				n.golden = 0.0
+				golden_node = null
+			_gather(n.kind, p, true, Bal.GOLDEN_MULT if golden else 1.0)
+			if golden:
+				fx.text(p + Vector2(0, -50), "ALTIN!", Color(1, 0.85, 0.2), 44)
+				fx.ring(p, 120.0, Color(1, 0.85, 0.2), 0.5)
+				Sfx.play("herb", 0.7)
+				Sfx.vibrate(30)
 			return
 
-func _gather(kind: String, p: Vector2, show_text: bool) -> void:
-	var mult := 1.0
-	if effects.gather > 0.0:
-		mult = float(active_ulti.get("gather", {}).get("mult", 2.0))
-	var amount: float = Bal.YIELD[kind] * mult
+# ---------------------------------------------------------------- vuruş ve kombo
+
+func _enemy_at(p: Vector2) -> Enemy:
+	var best: Enemy = null
+	var best_d := INF
+	for e in enemies:
+		if e.hp <= 0.0:
+			continue
+		var big := 2.2 if e.type == "boss" else 1.0
+		var d: float = (e.position + Vector2(0, -28.0 * big)).distance_to(p)
+		if d < Bal.STRIKE_RADIUS * big and d < best_d:
+			best_d = d
+			best = e
+	return best
+
+func combo_mult() -> int:
+	return mini(1 + combo / Bal.COMBO_STEP, Bal.COMBO_MAX_MULT + lv("kombo"))
+
+func _register_tap() -> void:
+	combo = combo + 1 if combo_timer > 0.0 else 1
+	combo_timer = Bal.COMBO_WINDOW
+	best_combo = maxi(best_combo, combo)
+
+func strike_damage() -> float:
+	var d := Bal.HERO_STRIKE * pow(Bal.wave_scale(maxi(wave, 1)), Bal.STRIKE_SCALE_POW) * (1.0 + 0.25 * lv("vurus")) * combo_mult()
+	if lv("tengri") > 0:
+		d *= 2.0
+	return d
+
+## Kahraman düşmana vurur (dokunuşla)
+func strike(e: Enemy) -> void:
+	_register_tap()
+	var dmg := strike_damage()
+	var from := player_castle.position + Vector2(70, -230)
+	var col: Color = hero.color.lightened(0.35)
+	Sfx.play("arrow", 1.6, -4.0)
+	var eid := e.get_instance_id()
+	fx.projectile(from, e.position + Vector2(0, -28), "strike", 0.14, func():
+		var t := instance_from_id(eid) as Enemy
+		if t == null or t.hp <= 0.0:
+			return
+		_strike_hit(t, dmg, col), col)
+
+func _strike_hit(e: Enemy, dmg: float, col: Color) -> void:
+	e.hit(dmg)
+	fx.text(e.position + Vector2(0, -50), str(int(ceil(dmg))), Color(1, 1, 0.85), 26)
+	Sfx.play("hit_bar", 1.6, -8.0)
+	if lv("tengri") > 0:
+		for o in enemies:
+			if o != e and o.hp > 0.0 and o.position.distance_to(e.position) < 110.0:
+				o.hit(dmg * 0.5)
+		fx.ring(e.position, 110.0, col, 0.3)
+
+func _gather(kind: String, p: Vector2, show_text: bool, bonus := 1.0) -> void:
+	var mult := bonus
+	if effects.gather > 0.0 and show_text:
+		mult *= float(active_ulti.get("gather", {}).get("mult", 2.0))
+	if show_text:
+		mult *= combo_mult()
+	var base: float = Bal.YIELD[kind]
+	if show_text:
+		# relik verim artışları sadece oyuncunun kendi dokunuşlarına; köleler temel verimle toplar
+		var add := {"odun": 1.0 * lv("odun_verim"), "tas": 0.5 * lv("tas_verim"), "kemik": 0.5 * lv("kemik_verim"), "cali": 1.0 * lv("cali_verim")}
+		base += add[kind] + (1.0 if lv("kizil_elma") > 0 else 0.0)
+	var amount: float = base * mult
 	var key := kind
 	if kind == "cali":
 		key = "sifa" if rng.randf() < Bal.BUSH_HEAL_CHANCE else "diken"
@@ -199,9 +288,10 @@ func spend(kind: String, want: int) -> int:
 func add_castle(kind: String, want: int) -> void:
 	var n := spend(kind, want)
 	if n > 0:
-		castle_def += n * Bal.CASTLE_VALUE[kind]
+		var gain: float = n * Bal.CASTLE_VALUE[kind] * (1.0 + 0.5 * lv("kale_deger"))
+		castle_def += gain
 		Sfx.play("place")
-		fx.text(player_castle.position + Vector2(0, -250), "+%d" % int(n * Bal.CASTLE_VALUE[kind]), Color(0.6, 0.85, 1.0), 32)
+		fx.text(player_castle.position + Vector2(0, -250), "+%d" % int(gain), Color(0.6, 0.85, 1.0), 32)
 
 func barricade_locked() -> bool:
 	if barricade.hp > 0.0:
@@ -216,9 +306,10 @@ func add_barricade(kind: String, want: int) -> void:
 		return
 	var n := spend(kind, want)
 	if n > 0:
-		barricade.hp += n * Bal.BARRICADE_VALUE[kind]
+		var gain: float = n * Bal.BARRICADE_VALUE[kind] * (1.0 + 0.5 * lv("barikat_deger"))
+		barricade.hp += gain
 		Sfx.play("place", 0.9)
-		fx.text(barricade.position + Vector2(0, -120), "+%d" % int(n * Bal.BARRICADE_VALUE[kind]), Color(1, 0.85, 0.4), 30)
+		fx.text(barricade.position + Vector2(0, -120), "+%d" % int(gain), Color(1, 0.85, 0.4), 30)
 
 func add_thorns(want: int) -> void:
 	var n := spend("diken", want)
@@ -227,8 +318,11 @@ func add_thorns(want: int) -> void:
 		Sfx.play("place", 1.3)
 		fx.text(path.pos_at((s_zone + s_barricade) * 0.5), "+%d Diken" % n, RES_COLORS.diken, 28)
 
+func slave_cost() -> int:
+	return int(round(Bal.slave_cost(slaves) * (1.0 - 0.25 * lv("kole_ucuz"))))
+
 func buy_slave() -> bool:
-	var cost := Bal.slave_cost(slaves)
+	var cost := slave_cost()
 	if fear < cost:
 		return false
 	fear -= cost
@@ -259,6 +353,12 @@ func assign_slave(kind: String, delta: int) -> void:
 
 # ---------------------------------------------------------------- ultiler
 
+func ult_cooldown(i: int) -> float:
+	var cd: float = float(hero.ultis[i].cooldown) * (1.0 - 0.15 * lv("ulti_cd"))
+	if lv("bozkurt") > 0:
+		cd *= 0.5
+	return cd
+
 func ult_ready(i: int) -> bool:
 	return ult_cd[i] <= 0.0
 
@@ -271,17 +371,24 @@ func ult_press(i: int) -> void:
 	else:
 		eat_herb(i)
 
+## Bir bekleme süresinin en fazla yarısı şifayla kısaltılabilir
+func herb_room(i: int) -> float:
+	return ult_cooldown(i) * Bal.HERB_MAX_CUT - herb_cut[i]
+
 func eat_herb(i: int) -> bool:
-	if ult_ready(i) or res.sifa < 1.0:
+	if ult_ready(i) or res.sifa < 1.0 or herb_room(i) <= 0.0:
 		return false
 	res.sifa -= 1.0
-	ult_cd[i] = maxf(0.0, ult_cd[i] - Bal.HERB_COOLDOWN_CUT)
+	var cut := minf(Bal.HERB_COOLDOWN_CUT, herb_room(i))
+	herb_cut[i] += cut
+	ult_cd[i] = maxf(0.0, ult_cd[i] - cut)
 	Sfx.play("herb", 1.0 + randf() * 0.2)
 	return true
 
 func _activate(i: int) -> void:
 	var u: Dictionary = hero.ultis[i]
-	ult_cd[i] = u.cooldown
+	ult_cd[i] = ult_cooldown(i)
+	herb_cut[i] = 0.0
 	Sfx.play("smash" if u.kind == "smash" else "ulti")
 	Sfx.vibrate(60 if u.kind == "smash" else 30)
 	match u.kind:
@@ -317,6 +424,10 @@ func _process(delta: float) -> void:
 	if phase == "over":
 		return
 	time_alive += delta
+	combo_timer -= delta / maxf(Engine.time_scale, 0.01)
+	if combo_timer <= 0.0:
+		combo = 0
+	_update_golden(delta)
 	for i in ult_cd.size():
 		ult_cd[i] = maxf(0.0, ult_cd[i] - delta)
 	for k in effects:
@@ -340,11 +451,22 @@ func _process(delta: float) -> void:
 	if castle_def <= 0.0:
 		_game_over(false)
 
+func _update_golden(delta: float) -> void:
+	if golden_node and golden_node.golden <= 0.0:
+		golden_node = null
+	golden_next -= delta
+	if golden_next <= 0.0 and golden_node == null:
+		golden_next = rng.randf_range(Bal.GOLDEN_EVERY.x, Bal.GOLDEN_EVERY.y) * (1.0 - 0.3 * lv("altin"))
+		golden_node = nodes[rng.randi_range(0, nodes.size() - 1)]
+		golden_node.golden = Bal.GOLDEN_DURATION
+		Sfx.play("herb", 1.5, -4.0)
+
 func _update_slaves(delta: float) -> void:
+	var speed := Bal.SLAVE_TAPS_PER_SEC * (1.0 + 0.25 * lv("kole_hiz")) * (1.5 if lv("ak_ana") > 0 else 1.0)
 	for k in slave_assign:
 		if slave_assign[k] == 0:
 			continue
-		slave_acc[k] += slave_assign[k] * Bal.SLAVE_TAPS_PER_SEC * delta
+		slave_acc[k] += slave_assign[k] * speed * delta
 		while slave_acc[k] >= 1.0:
 			slave_acc[k] -= 1.0
 			_gather(k, Vector2.ZERO, false)
@@ -383,6 +505,33 @@ func _update_waves(delta: float) -> void:
 				else:
 					phase = "prep"
 					prep_left = Bal.PREP_TIME
+					if lv("kurt") > 0 and wave % 5 == 0:
+						slaves += lv("kurt")
+						fx.text(player_castle.position + Vector2(80, -150), "+%d Köle" % lv("kurt"), Color(0.85, 0.75, 0.6), 30)
+					_offer_relics()
+
+# ---------------------------------------------------------------- relikler
+
+func _offer_relics() -> void:
+	var rarity := "legend" if pending_legend else "common"
+	pending_legend = false
+	var choices: Array = Bal.relic_choices(relics, rarity, 3, rng)
+	if choices.is_empty() and rarity == "legend":
+		rarity = "common"
+		choices = Bal.relic_choices(relics, "common", 3, rng)
+	if choices.is_empty():
+		return
+	hud.show_relics(choices, rarity == "legend")
+
+func take_relic(id: String) -> void:
+	relics[id] = lv(id) + 1
+	match id:
+		"ergenekon":
+			castle_def *= 2.0
+			fx.text(player_castle.position + Vector2(0, -260), "x2", Color(1, 0.85, 0.3), 48)
+		"ak_ana":
+			slaves += 5
+	Sfx.play("ulti", 1.3)
 
 func _spawn(t: String, at_s := 0.0) -> Enemy:
 	var e := Enemy.new()
@@ -393,6 +542,11 @@ func _spawn(t: String, at_s := 0.0) -> Enemy:
 	world.add_child(e)
 	enemies.append(e)
 	_place(e)
+	if t == "boss":
+		boss = e
+		hud.banner("%s geliyor!" % e.data.name)
+		Sfx.play("wave", 0.6)
+		Sfx.vibrate(200)
 	return e
 
 func _place(e: Enemy) -> void:
@@ -407,7 +561,8 @@ func _update_enemies(delta: float) -> void:
 	var spd := enemy_speed
 	if effects.slow > 0.0:
 		spd *= float(active_ulti.slow.mult)
-	var dmg := Bal.THORN_DAMAGE
+	var dmg := Bal.THORN_DAMAGE * (1.0 + 0.25 * lv("diken_hasar"))
+	var eat_rate := Bal.THORNS_EATEN_PER_SEC + lv("diken_hiz")
 	if effects.poison > 0.0:
 		dmg *= float(active_ulti.poison.mult)
 	var dead: Array = []
@@ -444,6 +599,9 @@ func _update_enemies(delta: float) -> void:
 				else:
 					barricade.hp -= e.dps * delta
 					bar_hit = true
+					if lv("barikat_diken") > 0:
+						e.hit(e.dps * 0.5 * lv("barikat_diken") * delta)
+						e.flash = 0.0
 			Enemy.State.SHOOT:
 				var target := _ranged_target(r)
 				if r.is_empty():
@@ -474,7 +632,7 @@ func _update_enemies(delta: float) -> void:
 					e.set_meta("leaked", true)
 		# dikenler
 		if e.hp > 0.0 and e.s >= s_zone and e.s <= s_barricade:
-			e.thorn_acc += Bal.THORNS_EATEN_PER_SEC * delta
+			e.thorn_acc += eat_rate * delta
 			while e.thorn_acc >= 1.0 and thorns >= 1.0 and e.hp > 0.0:
 				thorns -= 1.0
 				e.thorn_acc -= 1.0
@@ -498,11 +656,21 @@ func _update_enemies(delta: float) -> void:
 		hud.banner("Barikat yıkıldı!")
 	for e in dead:
 		enemies.erase(e)
+		if e == boss:
+			boss = null
 		if not e.has_meta("leaked"):
 			kills += 1
-			fear += int(e.data.get("fear", Bal.FEAR_PER_KILL))
+			fear += int(round(float(e.data.get("fear", Bal.FEAR_PER_KILL)) * (1.0 + 0.5 * lv("korku"))))
 			fx.puff(e.position)
 			Sfx.play("death")
+			if lv("les") > 0 and rng.randf() < 0.25 * lv("les"):
+				res.sifa += 1.0
+				collected.sifa += 1.0
+			if e.type == "boss":
+				pending_legend = true
+				hud.banner("%s yenildi!" % e.data.name)
+				fx.ring(e.position, 260.0, Color(1, 0.85, 0.3), 0.8)
+				Sfx.vibrate(250)
 			# atlı araba yıkılınca içindekiler iner
 			for k in int(e.data.get("drops", 0)):
 				var d := _spawn("sopali", maxf(0.0, e.s - 10.0 - k * 14.0))
@@ -547,6 +715,8 @@ func _fire(e: Enemy, r: Dictionary, target: String) -> void:
 			fx.puff(to, Color(0.5, 0.45, 0.4)))
 
 func _hit_castle(amount: float) -> void:
+	if lv("umay") > 0:
+		amount *= 0.65
 	castle_def -= amount
 	player_castle.hit_fx()
 	fx.text(player_castle.position + Vector2(0, -200), "-%d" % int(ceil(amount)), Color(1, 0.35, 0.3), 34)
@@ -574,6 +744,8 @@ func _game_over(victory: bool) -> void:
 		"seconds": int(time_alive),
 		"slaves": slaves,
 		"kills": kills,
+		"relics": relics.size(),
+		"best_combo": best_combo,
 		"odun": int(collected.odun),
 		"tas": int(collected.tas),
 		"kemik": int(collected.kemik),

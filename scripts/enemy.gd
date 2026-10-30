@@ -63,7 +63,15 @@ func _draw() -> void:
 		"topcu": top = _draw_cannon()
 		"araba": top = _draw_cart()
 		"mancinik": top = _draw_catapult()
-	if hp < max_hp:
+		"boss":
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2(2.3, 2.3))
+			_draw_foot(Color(0.25, 0.22, 0.28), "club", "helmet")
+			draw_set_transform(Vector2.ZERO)
+			# boynuzlar ve pelerin
+			draw_colored_polygon(PackedVector2Array([Vector2(-14, -118), Vector2(-26, -140), Vector2(-8, -124)]), Color(0.9, 0.88, 0.8))
+			draw_colored_polygon(PackedVector2Array([Vector2(14, -118), Vector2(26, -140), Vector2(8, -124)]), Color(0.9, 0.88, 0.8))
+			top = -160.0
+	if hp < max_hp and type != "boss":
 		var w := 32.0 if top > -80.0 else 56.0
 		Gfx.bar(self, Vector2(0, top), w, 4, hp / max_hp, Color(0.9, 0.2, 0.2))
 

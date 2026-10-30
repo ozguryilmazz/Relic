@@ -48,7 +48,7 @@ func _draw() -> void:
 	draw_arc(c, r, 0, TAU, 48, Ui.GOLD if ready else Color(0.4, 0.35, 0.3), 5.0)
 	var font := get_theme_default_font()
 	if not ready:
-		var k: float = game.ult_cd[index] / float(u.cooldown)
+		var k: float = game.ult_cd[index] / maxf(game.ult_cooldown(index), 0.01)
 		var pts := PackedVector2Array([c])
 		var steps := 40
 		for i in steps + 1:

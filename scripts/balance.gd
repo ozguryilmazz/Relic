@@ -33,15 +33,16 @@ const THORNS_EATEN_PER_SEC := 2.0  # bölgedeki her düşmanın saniyede tükett
 # --- Şifa ---
 const HERB_COOLDOWN_CUT := 1.0     # bir bitki kalan cooldown'dan kaç sn düşer
 const HERB_EAT_INTERVAL := 0.08    # basılı tutunca bitki yeme aralığı
+const HERB_MAX_CUT := 0.5          # bir bekleme süresinin en fazla bu kadarı şifayla kısaltılabilir
 
 # --- Korku ve köleler ---
 const FEAR_PER_KILL := 1
 const SLAVE_BASE_COST := 10
-const SLAVE_COST_STEP := 5
+const SLAVE_COST_GROWTH := 1.2    # her kölede fiyat %20 artar
 const SLAVE_TAPS_PER_SEC := 0.5    # bir kölenin saniyedeki tıklaması
 
 func wave_scale(wave: int) -> float:
-	return pow(1.04, wave - 1)
+	return pow(1.045, wave - 1)
 
 func enemy_count(wave: int) -> int:
 	return 5 + int(wave / 2.0)
@@ -52,6 +53,70 @@ func enemy_hp(wave: int) -> float:
 func enemy_dps(wave: int) -> float:
 	# barikata saniyede verdiği hasar
 	return 3.0 * wave_scale(wave)
+
+# --- Kahraman vuruşu (düşmana dokununca) ---
+const HERO_STRIKE := 4.0           # bir dokunuşun temel hasarı
+const STRIKE_SCALE_POW := 0.6      # vuruş dalgayla düşmanlardan yavaş güçlenir (wave_scale ^ 0.6)
+const STRIKE_RADIUS := 55.0        # düşmanın etrafında dokunuşun sayıldığı alan
+
+# --- Kombo ---
+const COMBO_WINDOW := 0.7          # iki dokunuş arası en fazla bu kadar olursa kombo sürer (sn)
+const COMBO_STEP := 20             # her 20 dokunuşta çarpan +1
+const COMBO_MAX_MULT := 3          # en yüksek çarpan (relikle artar)
+
+# --- Altın kaynak ---
+const GOLDEN_EVERY := Vector2(15.0, 25.0)   # iki altın kaynak arası (sn, rastgele)
+const GOLDEN_DURATION := 5.0
+const GOLDEN_MULT := 10.0
+
+# --- Boss ---
+const BOSS_EVERY := 10
+const BOSS_HP_MULT := 25.0         # sopalı askerin kaç katı can
+const BOSS_MELEE_MULT := 6.0
+
+# --- Relikler ---
+# rarity: "common" her dalga sonu, "legend" boss yenilince. max: kaç kez alınabilir.
+const RELICS := {
+	"diken_hasar":  {"name": "Zehirli Dikenler", "desc": "Diken hasarı +%25", "max": 5, "rarity": "common"},
+	"diken_hiz":    {"name": "Sivri Dikenler", "desc": "Düşmanlar saniyede +1 diken daha yer", "max": 3, "rarity": "common"},
+	"cali_verim":   {"name": "Bereketli Çalılar", "desc": "Çalı başına +1 diken/şifa", "max": 3, "rarity": "common"},
+	"odun_verim":   {"name": "Keskin Balta", "desc": "Odun başına +1", "max": 3, "rarity": "common"},
+	"tas_verim":    {"name": "Demir Kazma", "desc": "Taş başına +0,5", "max": 3, "rarity": "common"},
+	"kemik_verim":  {"name": "Kemik Avcısı", "desc": "Kemik başına +0,5", "max": 3, "rarity": "common"},
+	"kale_deger":   {"name": "Usta Duvarcı", "desc": "Kaleye eklenen kaynaklar +%50 savunma", "max": 4, "rarity": "common"},
+	"barikat_deger": {"name": "Sağlam Temel", "desc": "Barikata eklenen kaynaklar +%50 can", "max": 4, "rarity": "common"},
+	"barikat_diken": {"name": "Dikenli Barikat", "desc": "Barikata vuranlar verdikleri hasarın %50'sini alır", "max": 3, "rarity": "common"},
+	"kole_hiz":     {"name": "Kırbaç", "desc": "Köleler %25 daha hızlı toplar", "max": 3, "rarity": "common"},
+	"kole_ucuz":    {"name": "Esir Pazarı", "desc": "Köle fiyatı -%25", "max": 2, "rarity": "common"},
+	"korku":        {"name": "Dehşet Saçan", "desc": "Öldürmelerden +%50 korku", "max": 3, "rarity": "common"},
+	"ulti_cd":      {"name": "Kadim Ruh", "desc": "Ulti bekleme süreleri -%15", "max": 3, "rarity": "common"},
+	"vurus":        {"name": "Keskin Pençe", "desc": "Kahraman vuruşu +%25", "max": 5, "rarity": "common"},
+	"kombo":        {"name": "Savaş Davulu", "desc": "En yüksek kombo çarpanı +1", "max": 3, "rarity": "common"},
+	"altin":        {"name": "Altın Göz", "desc": "Altın kaynaklar daha sık çıkar", "max": 2, "rarity": "common"},
+	"les":          {"name": "Leş Yiyici", "desc": "Her öldürmede %25 ihtimalle 1 şifa", "max": 3, "rarity": "common"},
+	"kurt":         {"name": "Kurt Sürüsü", "desc": "Her 5 dalgada 1 bedava köle", "max": 1, "rarity": "common"},
+	# efsanevi
+	"kizil_elma":   {"name": "Kızıl Elma", "desc": "Tüm kaynak toplama +1", "max": 1, "rarity": "legend"},
+	"ergenekon":    {"name": "Ergenekon", "desc": "Kale savunması anında 2 katına çıkar", "max": 1, "rarity": "legend"},
+	"bozkurt":      {"name": "Bozkurt", "desc": "Ulti bekleme süreleri yarıya iner", "max": 1, "rarity": "legend"},
+	"tengri":       {"name": "Tengri'nin Gazabı", "desc": "Kahraman vuruşu 2 katı, yakındakilere de vurur", "max": 1, "rarity": "legend"},
+	"umay":         {"name": "Umay'ın Kalkanı", "desc": "Kaleye gelen hasar -%35", "max": 1, "rarity": "legend"},
+	"ak_ana":       {"name": "Ak Ana", "desc": "+5 köle, köleler %50 daha hızlı", "max": 1, "rarity": "legend"},
+}
+
+func relic_choices(owned: Dictionary, rarity: String, count: int, rng: RandomNumberGenerator) -> Array:
+	var pool: Array = []
+	for id in RELICS:
+		var r: Dictionary = RELICS[id]
+		if r.rarity == rarity and int(owned.get(id, 0)) < int(r.max):
+			pool.append(id)
+	# karıştır
+	for i in range(pool.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var t = pool[i]
+		pool[i] = pool[j]
+		pool[j] = t
+	return pool.slice(0, mini(count, pool.size()))
 
 # --- Düşman tipleri ---
 # hp/speed/melee: temel değerin çarpanı. fear: öldürünce verdiği korku.
@@ -72,6 +137,7 @@ const ENEMY_TYPES := {
 	"araba":   {"name": "Atlı arabalar", "hp": 4.0, "speed": 0.7, "melee": 3.0, "fear": 3, "drops": 2},
 	"mancinik": {"name": "Mancınıklar", "hp": 3.0, "speed": 0.5, "melee": 1.0, "fear": 5,
 		"ranged": {"target": "castle", "stand": 480.0, "ammo": 3, "interval": 4.0, "shot": 15.0, "proj": "rock", "after": "retreat"}},
+	"boss":    {"name": "Dev Bahadır", "hp": BOSS_HP_MULT, "speed": 0.55, "melee": BOSS_MELEE_MULT, "fear": 25, "boss": true},
 }
 
 ## Dalganın tip karışımı: [[tip, ağırlık], ...]
@@ -112,6 +178,9 @@ func wave_roster(wave: int, rng: RandomNumberGenerator) -> Array:
 		var tmp = out[i]
 		out[i] = out[j]
 		out[j] = tmp
+	# boss dalgası: boss en son çıkar (liste sondan tüketiliyor)
+	if wave % BOSS_EVERY == 0:
+		out.insert(0, "boss")
 	return out
 
 ## Bu dalgada ilk kez görülen tipler
@@ -128,7 +197,7 @@ func new_types(wave: int) -> Array:
 	return out
 
 func slave_cost(owned: int) -> int:
-	return SLAVE_BASE_COST + SLAVE_COST_STEP * owned
+	return int(round(SLAVE_BASE_COST * pow(SLAVE_COST_GROWTH, owned)))
 
 # --- Kahramanlar ---
 # kind: ultinin ne yaptığı (game.gd içinde uygulanır)
@@ -139,7 +208,7 @@ const HEROES := [
 		"desc": "Alnının ortasında tek gözü olan, insan etiyle beslenen dev.",
 		"color": Color(0.55, 0.42, 0.3),
 		"ultis": [
-			{"kind": "smash", "name": "Ezici Darbe", "info": "Öndeki düşmanların üstüne atlar, büyük alan hasarı verir.", "cooldown": 45.0, "radius": 260.0, "damage_mult": 2.0},
+			{"kind": "smash", "name": "Ezici Darbe", "info": "Öndeki düşmanların üstüne atlar, büyük alan hasarı verir.", "cooldown": 45.0, "radius": 220.0, "damage_mult": 1.2},
 			{"kind": "gather", "name": "Açlık", "info": "7 sn boyunca kaynak toplama 2 katı.", "cooldown": 45.0, "duration": 7.0, "mult": 2.0},
 		],
 	},

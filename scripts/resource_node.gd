@@ -7,6 +7,8 @@ var kind := "odun"
 var radius := 110.0
 var items: Array = []        # [{pos, size, seed, pop}]
 var slaves := 0              # bu bölgeye atanan köle sayısı (çizim için)
+var golden := 0.0            # altın kaynak kalan süresi
+var glow_t := 0.0
 
 func setup(k: String, r: float, count: int, seed_v: int) -> void:
 	kind = k
@@ -43,6 +45,10 @@ func tap(p: Vector2) -> void:
 
 func _process(delta: float) -> void:
 	var dirty := false
+	if golden > 0.0:
+		golden = maxf(0.0, golden - delta)
+		glow_t += delta
+		dirty = true
 	for it in items:
 		if it.pop > 0.0:
 			it.pop = maxf(0.0, it.pop - delta * 5.0)
@@ -51,6 +57,14 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 func _draw() -> void:
+	# altın parıltı
+	if golden > 0.0:
+		var pulse := 0.6 + sin(glow_t * 8.0) * 0.25
+		var fade := minf(golden, 1.0)
+		Gfx.ellipse(self, Vector2.ZERO, radius * 1.35, radius * 0.95, Color(1, 0.85, 0.2, 0.35 * pulse * fade))
+		var ring := Gfx.ellipse_pts(Vector2.ZERO, radius * 1.3, radius * 0.9, 40)
+		ring.append(ring[0])
+		draw_polyline(ring, Color(1, 0.9, 0.3, pulse * fade), 5.0)
 	# zemin lekesi
 	match kind:
 		"kemik":

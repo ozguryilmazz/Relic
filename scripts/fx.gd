@@ -10,8 +10,8 @@ func puff(p: Vector2, col := Color(0.9, 0.9, 0.9)) -> void:
 func ring(p: Vector2, r: float, col: Color, dur := 0.6) -> void:
 	items.append({"type": "ring", "pos": p, "t": 0.0, "dur": dur, "r": r, "col": col})
 
-func projectile(from: Vector2, to: Vector2, kind: String, dur: float, on_hit: Callable) -> void:
-	items.append({"type": "proj", "from": from, "to": to, "kind": kind, "t": 0.0, "dur": dur, "on_hit": on_hit})
+func projectile(from: Vector2, to: Vector2, kind: String, dur: float, on_hit: Callable, col := Color.WHITE) -> void:
+	items.append({"type": "proj", "from": from, "to": to, "kind": kind, "t": 0.0, "dur": dur, "on_hit": on_hit, "col": col})
 
 func text(p: Vector2, s: String, col := Color.WHITE, size := 30) -> void:
 	var l := Label.new()
@@ -54,7 +54,11 @@ func _draw() -> void:
 			"proj":
 				var a: Vector2 = it.from
 				var b: Vector2 = it.to
-				var h := 60.0 if it.kind == "arrow" else 140.0
+				var h := 140.0
+				if it.kind == "arrow":
+					h = 60.0
+				elif it.kind == "strike":
+					h = 20.0
 				var pos := a.lerp(b, k) + Vector2(0, -sin(k * PI) * h)
 				var nxt := a.lerp(b, minf(k + 0.03, 1.0)) + Vector2(0, -sin(minf(k + 0.03, 1.0) * PI) * h)
 				match it.kind:
@@ -64,6 +68,12 @@ func _draw() -> void:
 						draw_line(pos - d * 14.0, pos - d * 10.0, Color(0.9, 0.9, 0.9), 3.0)
 					"ball":
 						draw_circle(pos, 6.0, Color(0.12, 0.12, 0.14))
+					"strike":
+						var c3: Color = it.col
+						var back := a.lerp(b, maxf(k - 0.25, 0.0))
+						draw_line(back, pos, Color(c3.r, c3.g, c3.b, 0.5), 8.0)
+						draw_circle(pos, 10.0, c3)
+						draw_circle(pos, 5.0, Color(1, 1, 1))
 					"rock":
 						Gfx.shadow(self, a.lerp(b, k) + Vector2(0, 30), 12.0 * (1.0 - sin(k * PI) * 0.5), 4.0, 0.2)
 						draw_circle(pos, 11.0, Color(0.5, 0.5, 0.52))

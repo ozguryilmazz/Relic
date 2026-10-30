@@ -27,6 +27,15 @@ var banner_label: Label
 var pause_overlay: Control
 var over_overlay: Control
 var blockers: Array = []
+var combo_label: Label
+var boss_box: Control
+var boss_bar: ProgressBar
+var boss_label: Label
+var thorn_btn: TouchButton
+var relic_overlay: Control
+var relic_cards: HBoxContainer
+var relic_title: Label
+var pause_relics: Label
 
 const SLAVE_KINDS := [["odun", "Orman"], ["tas", "Kayalık"], ["cali", "Çalılık"], ["kemik", "Çöl"]]
 
@@ -42,7 +51,9 @@ func _ready() -> void:
 	_build_slaves()
 	_build_popup()
 	_build_banner()
+	_build_extras()
 	_build_pause()
+	_build_relics()
 
 # ---------------------------------------------------------------- kurulum
 
@@ -225,6 +236,9 @@ func _build_pause() -> void:
 	var t := Ui.label("Duraklatıldı", 44, Ui.GOLD)
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vb.add_child(t)
+	pause_relics = Ui.label("", 22, Color(0.9, 0.85, 0.7))
+	pause_relics.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	vb.add_child(pause_relics)
 	var cont := Ui.button("Devam", 32)
 	cont.pressed.connect(_resume)
 	vb.add_child(cont)
@@ -297,6 +311,7 @@ func show_game_over(stats: Dictionary) -> void:
 		"Dayanma süresi: %s" % Ui.fmt_time(stats.seconds),
 		"Öldürülen düşman: %d" % stats.kills,
 		"Edinilen köle: %d" % stats.slaves,
+		"En uzun kombo: %d · Relik: %d" % [stats.best_combo, stats.relics],
 		"Toplanan: Odun %d · Taş %d · Kemik %d · Diken %d · Şifa %d" % [stats.odun, stats.tas, stats.kemik, stats.diken, stats.sifa],
 	]
 	for s in lines:
@@ -345,6 +360,14 @@ func _pause() -> void:
 	close_popup()
 	get_tree().paused = true
 	pause_overlay.visible = true
+	pause_relics.text = "Relikler: " + relic_summary() if not game.relics.is_empty() else "Henüz relik yok."
+
+func relic_summary() -> String:
+	var parts: Array = []
+	for id in game.relics:
+		var n: int = game.relics[id]
+		parts.append(Bal.RELICS[id].name + ("" if n == 1 else " x%d" % n))
+	return ", ".join(parts)
 
 func _resume() -> void:
 	pause_overlay.visible = false
@@ -374,8 +397,8 @@ func _refresh_popup() -> void:
 		var have := int(floor(game.res[row.kind] + 0.0001))
 		var gain := ""
 		match popup_kind:
-			"castle": gain = " (+%d)" % int(Bal.CASTLE_VALUE[row.kind])
-			"barricade": gain = " (+%d)" % int(Bal.BARRICADE_VALUE[row.kind])
+			"castle": gain = " (+%d)" % int(Bal.CASTLE_VALUE[row.kind] * (1.0 + 0.5 * game.lv("kale_deger")))
+			"barricade": gain = " (+%d)" % int(Bal.BARRICADE_VALUE[row.kind] * (1.0 + 0.5 * game.lv("barikat_deger")))
 		row.label.text = "%s %d%s" % [Game.RES_NAMES[row.kind], have, gain]
 		for b in row.buttons:
 			b.disabled = locked or have < 1
@@ -396,12 +419,12 @@ func _process(_delta: float) -> void:
 	time_label.text = Ui.fmt_time(game.time_alive)
 	var waiting := false
 	for i in game.ult_cd.size():
-		if not game.ult_ready(i):
+		if not game.ult_ready(i) and game.herb_room(i) > 0.0:
 			waiting = true
 	hint_label.text = "Beklemedeki ultiye dokun: şifa ye (-%d sn) · Şifa %d" % [int(Bal.HERB_COOLDOWN_CUT), int(game.res.sifa)] if waiting and game.res.sifa >= 1.0 else ""
 	slave_btn.text = "Köleler %d" % game.slaves
 	if slave_panel.visible:
-		var cost := Bal.slave_cost(game.slaves)
+		var cost := game.slave_cost()
 		slave_info.text = "Boşta: %d / %d" % [game.free_slaves(), game.slaves]
 		slave_buy.text = "Köle al (%d korku)" % cost
 		slave_buy.disabled = game.fear < cost
@@ -409,3 +432,135 @@ func _process(_delta: float) -> void:
 			slave_rows[k].text = str(game.slave_assign[k])
 	if popup.visible:
 		_refresh_popup()
+	# kombo
+	if game.combo >= 5:
+		combo_label.text = "KOMBO %d  ·  x%d" % [game.combo, game.combo_mult()]
+		combo_label.modulate.a = 1.0
+		var m := game.combo_mult()
+		combo_label.add_theme_color_override("font_color", [Color.WHITE, Color.WHITE, Color(1, 0.85, 0.3), Color(1, 0.55, 0.2), Color(1, 0.3, 0.3)][mini(m, 4)])
+	else:
+		combo_label.modulate.a = maxf(0.0, combo_label.modulate.a - _delta * 3.0)
+	# boss
+	boss_box.visible = game.boss != null and is_instance_valid(game.boss)
+	if boss_box.visible:
+		boss_bar.max_value = game.boss.max_hp
+		boss_bar.value = maxf(game.boss.hp, 0.0)
+		boss_label.text = "%s  %d / %d" % [game.boss.data.name, int(ceil(maxf(game.boss.hp, 0.0))), int(game.boss.max_hp)]
+	# diken dök butonu
+	var d := int(floor(game.res.diken + 0.0001))
+	thorn_btn.text = "Dikenleri dök (%d)" % d
+	thorn_btn.disabled = d < 1
+
+# ---------------------------------------------------------------- kombo, boss, relik
+
+func _build_extras() -> void:
+	combo_label = Ui.label("", 40, Color.WHITE, true)
+	combo_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	combo_label.offset_left = -300
+	combo_label.offset_right = 300
+	combo_label.offset_top = 92
+	combo_label.offset_bottom = 150
+	combo_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	combo_label.modulate.a = 0.0
+	root.add_child(combo_label)
+
+	boss_box = VBoxContainer.new()
+	boss_box.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	boss_box.offset_left = -360
+	boss_box.offset_right = 360
+	boss_box.offset_top = 150
+	boss_box.offset_bottom = 220
+	boss_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	boss_box.visible = false
+	root.add_child(boss_box)
+	boss_label = Ui.label("", 26, Color(1, 0.6, 0.5), true)
+	boss_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	boss_box.add_child(boss_label)
+	boss_bar = ProgressBar.new()
+	boss_bar.show_percentage = false
+	boss_bar.custom_minimum_size.y = 18
+	boss_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	boss_bar.add_theme_stylebox_override("background", Ui.box(Color(0, 0, 0, 0.7), 6))
+	boss_bar.add_theme_stylebox_override("fill", Ui.box(Color(0.85, 0.15, 0.12), 6))
+	boss_box.add_child(boss_bar)
+
+	thorn_btn = Ui.button("", 26, 260)
+	thorn_btn.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	thorn_btn.offset_left = 430
+	thorn_btn.offset_right = 730
+	thorn_btn.offset_top = -100
+	thorn_btn.offset_bottom = -30
+	thorn_btn.add_theme_color_override("font_color", Game.RES_COLORS.diken)
+	thorn_btn.pressed.connect(func(): game.add_thorns(1000000))
+	root.add_child(thorn_btn)
+	blockers.append(thorn_btn)
+
+func _build_relics() -> void:
+	relic_overlay = _overlay()
+	var vb := VBoxContainer.new()
+	vb.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	vb.alignment = BoxContainer.ALIGNMENT_CENTER
+	vb.add_theme_constant_override("separation", 30)
+	relic_overlay.add_child(vb)
+	relic_title = Ui.label("", 48, Ui.GOLD, true)
+	relic_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	vb.add_child(relic_title)
+	relic_cards = HBoxContainer.new()
+	relic_cards.alignment = BoxContainer.ALIGNMENT_CENTER
+	relic_cards.add_theme_constant_override("separation", 30)
+	vb.add_child(relic_cards)
+
+func relic_open() -> bool:
+	return relic_overlay.visible
+
+func show_relics(choices: Array, legend: bool) -> void:
+	close_popup()
+	for c in relic_cards.get_children():
+		c.queue_free()
+	relic_title.text = "Efsanevi relik seç!" if legend else "Dalga %d atlatıldı · Bir relik seç" % game.wave
+	for id in choices:
+		var r: Dictionary = Bal.RELICS[id]
+		var have := game.lv(id)
+		var b := TouchButton.new()
+		b.custom_minimum_size = Vector2(440, 300)
+		b.focus_mode = Control.FOCUS_NONE
+		var border := Color(1, 0.7, 0.2) if legend else Color(0.6, 0.5, 0.3)
+		var bg := Color(0.25, 0.12, 0.05, 0.96) if legend else Color(0.12, 0.1, 0.08, 0.96)
+		b.add_theme_stylebox_override("normal", Ui.box(bg, 18, border, 4))
+		b.add_theme_stylebox_override("hover", Ui.box(bg.lightened(0.1), 18, Ui.GOLD, 4))
+		b.add_theme_stylebox_override("pressed", Ui.box(bg.darkened(0.2), 18, Ui.GOLD, 4))
+		var inner := VBoxContainer.new()
+		inner.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		inner.offset_left = 20
+		inner.offset_right = -20
+		inner.offset_top = 24
+		inner.offset_bottom = -20
+		inner.add_theme_constant_override("separation", 14)
+		inner.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		b.add_child(inner)
+		var nm := Ui.label(r.name, 34, Ui.GOLD if legend else Color(1, 0.92, 0.75))
+		nm.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		inner.add_child(nm)
+		var lvl := "Efsanevi" if legend else ("Yeni" if have == 0 else "Seviye %d → %d" % [have, have + 1])
+		var ll := Ui.label(lvl, 22, Color(0.75, 0.7, 0.6))
+		ll.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		inner.add_child(ll)
+		var desc := Ui.label(r.desc, 28)
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		inner.add_child(desc)
+		var pick_id: String = id
+		b.pressed.connect(func(): pick_relic(pick_id))
+		relic_cards.add_child(b)
+	relic_overlay.visible = true
+	get_tree().paused = true
+	Sfx.play("ulti", 0.8, -6.0)
+
+func pick_relic(id: String) -> void:
+	if not relic_overlay.visible:
+		return
+	relic_overlay.visible = false
+	get_tree().paused = false
+	game.touches.clear()
+	game.take_relic(id)
+	banner(Bal.RELICS[id].name)
